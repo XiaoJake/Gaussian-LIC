@@ -68,7 +68,15 @@ We test on ubuntu 20.04 with an NVIDIA RTX 3090 / 4090.
    ```
 
 
-6. Install Coco-LIC.
+6. Prepare [TensorRT](https://developer.nvidia.com/tensorrt/download).（no compilation or installation required）
+
+   ```shell
+   cd ~/Software
+   wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/secure/8.6.1/tars/TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz
+   tar -zxvf TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz && rm -rf TensorRT-8.6.1.6.Linux.x86_64-gnu.cuda-11.8.tar.gz
+   ```
+   
+7. Install Coco-LIC.
 
    ```shell
    mkdir -p ~/catkin_coco/src
@@ -80,8 +88,7 @@ We test on ubuntu 20.04 with an NVIDIA RTX 3090 / 4090.
    cd ~/catkin_coco && catkin_make
    ```
 
-
-7. Install Gaussian-LIC.
+8. Install Gaussian-LIC.
 
    ```shell
    mkdir -p ~/catkin_gaussian/src
@@ -90,21 +97,37 @@ We test on ubuntu 20.04 with an NVIDIA RTX 3090 / 4090.
    cd ~/catkin_gaussian && catkin_make
    ```
 
+9. TensorRT Deployment.
+
+   download and save [Large_300.pth](https://drive.google.com/file/d/11dujPviL4pKLEXytXK0mEmPBNQDqgEak/view?pli=1) to `~/catkin_gaussian/src/Gaussian-LIC/ckpt`.
+
+   ```shell
+   cd ~/catkin_gaussian/src/Gaussian-LIC/ckpt
+   
+   chmod +x setup_spnet.sh
+   ./setup_spnet.sh
+   
+   chmod +x export_onnx.sh
+   ./export_onnx.sh
+   
+   chmod +x build_trt.sh
+   ./build_trt.sh
+   ```
 
 ## Run
 
-Quick start on the sequence hku2 in the FAST-LIVO dataset.
+Quick start on the sequence CBD_Building_01 in the FAST-LIVO2 dataset.
 
-- Download [FAST-LIVO Dataset](https://connecthkuhk-my.sharepoint.com/personal/zhengcr_connect_hku_hk/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fzhengcr%5Fconnect%5Fhku%5Fhk%2FDocuments%2FFAST%2DLIVO%2DDatasets&ga=1) or [R3LIVE Dataset](https://github.com/ziv-lin/r3live_dataset) or [MCD Dataset](https://mcdviral.github.io/).
+- Download [FAST-LIVO Dataset](https://connecthkuhk-my.sharepoint.com/personal/zhengcr_connect_hku_hk/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fzhengcr%5Fconnect%5Fhku%5Fhk%2FDocuments%2FFAST%2DLIVO%2DDatasets&ga=1) or [FAST-LIVO2 Dataset](https://connecthkuhk-my.sharepoint.com/:f:/g/personal/zhengcr_connect_hku_hk/ErdFNQtjMxZOorYKDTtK4ugBkogXfq1OfDm90GECouuIQA?e=KngY9Z) or [R3LIVE Dataset](https://github.com/ziv-lin/r3live_dataset) or [MCD Dataset](https://mcdviral.github.io/) or [M2DGR Dataset](https://github.com/SJTU-ViSYS/M2DGR).
 
-+ Modify `bag_path` in the `config/ct_odometry_fastlivo.yaml` file of Coco-LIC.
++ Modify `bag_path` in the `config/ct_odometry_fastlivo2.yaml` file of Coco-LIC.
 
 + Launch Gaussian-LIC.
 
   ```shell
   cd ~/catkin_gaussian
   source devel/setup.bash
-  roslaunch gaussian_lic fastlivo.launch  // The terminal will print "😋 Gaussian-LIC Ready!".
+  roslaunch gaussian_lic fastlivo2.launch  // The terminal will print "😋 Gaussian-LIC Ready!".
   ```
 
 
@@ -115,11 +138,18 @@ Quick start on the sequence hku2 in the FAST-LIVO dataset.
   ```shell
   cd ~/catkin_coco
   source devel/setup.bash
-  roslaunch cocolic odometry.launch config_path:=config/ct_odometry_fastlivo.yaml
+  roslaunch cocolic odometry.launch config_path:=config/ct_odometry_fastlivo2.yaml
   ```
 
 
 + The mapping and rendering results will be saved in  `~/catkin_gaussian/src/Gaussian-LIC/result`.
+
+## Checklist
+
+- [ ] Support fast post-optimization
+- [ ] Release the optimized Coco-LIC
+- [ ] Release the meshing tools
+- [ ] Release our Gaussian-LIC2 dataset
 
 ## Citation
 

@@ -16,10 +16,11 @@ simple_knn.egg-info/
 
 result/
 
-ckpt/*
-!ckpt/SPNet.md
-
+*.pth
 *.onnx
 *.engine
 
 third_party/
+
+__pycache__/
+*.py[cod]
