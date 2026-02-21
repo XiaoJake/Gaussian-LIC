@@ -18,7 +18,7 @@
 
 #include "renderer.h"
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 render(const std::shared_ptr<Camera>& viewpoint_camera,
        std::shared_ptr<GaussianModel> pc,
        torch::Tensor& bg_color,
@@ -76,10 +76,12 @@ render(const std::shared_ptr<Camera>& viewpoint_camera,
                                     cov3D_precomp);
     auto rendered_image = std::get<0>(rasterizer_result);
     auto radii = std::get<1>(rasterizer_result);
-    auto rendered_final_T = std::get<2>(rasterizer_result);
+    auto rendered_depth = std::get<2>(rasterizer_result);
+    auto rendered_final_T = std::get<3>(rasterizer_result);
 
     return std::make_tuple(
-        rendered_image,   
+        rendered_image,
+        rendered_depth,   
         rendered_final_T,
         screenspace_points, 
         radii > 0,          

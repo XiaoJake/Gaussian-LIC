@@ -27,7 +27,7 @@
 
 class GaussianModel;
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 render(const std::shared_ptr<Camera>& viewpoint_camera,
        std::shared_ptr<GaussianModel> pc,
        torch::Tensor& bg_color,

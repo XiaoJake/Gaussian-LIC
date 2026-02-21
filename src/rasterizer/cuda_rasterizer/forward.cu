@@ -324,7 +324,7 @@ renderCUDA(
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	const uint32_t* __restrict__ per_tile_bucket_offset, uint32_t* __restrict__ bucket_to_tile,
-	float* __restrict__ sampled_T, float* __restrict__ sampled_ar,
+	float* __restrict__ sampled_T, float* __restrict__ sampled_ar, float* __restrict__ sampled_ad,
 	int W, int H,
 	const float2* __restrict__ points_xy_image, 
 	const float* __restrict__ depths,
@@ -335,6 +335,7 @@ renderCUDA(
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
 	float* __restrict__ out_final_T,
+	float* __restrict__ out_depth,
 	bool no_color) 
 {
 	// Identify current tile and associated min/max pixel range.
@@ -378,6 +379,7 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_depth[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -385,6 +387,7 @@ renderCUDA(
 	uint32_t last_contributor = 0;
 	uint32_t contributor_real = 0;
 	float C[CHANNELS] = { 0 };
+	float depth_render = 0.f;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE) 
@@ -402,6 +405,7 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			collected_depth[block.thread_rank()] = depths[coll_id];
 		}
 		block.sync();
 
@@ -416,6 +420,7 @@ renderCUDA(
 				{
 					sampled_ar[(bbm * BLOCK_SIZE * CHANNELS) + ch * BLOCK_SIZE + block.thread_rank()] = C[ch];  //
 				}
+				sampled_ad[(bbm * BLOCK_SIZE) + block.thread_rank()] = depth_render;
 				++bbm;
 			}
 
@@ -447,6 +452,7 @@ renderCUDA(
 			{
 				for (int ch = 0; ch < CHANNELS; ch++) 
 					C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+				depth_render += collected_depth[j] * alpha * T;
 				contributor_real++;
 			}
 
@@ -465,6 +471,7 @@ renderCUDA(
 			n_contrib[pix_id] = last_contributor;
 			for (int ch = 0; ch < CHANNELS; ch++) 
 				out_color[ch * H * W + pix_id] = C[ch];
+			out_depth[pix_id] = contributor_real ? depth_render / (1 - T) : 0.f;
 		}
 	}
 	if (no_color) { return; }
@@ -484,7 +491,7 @@ renderCUDA(
 void FORWARD::render( const dim3 grid, dim3 block, const uint2* ranges,
 	const uint32_t* point_list,
 	const uint32_t* per_tile_bucket_offset, uint32_t* bucket_to_tile,
-	float* sampled_T, float* sampled_ar,
+	float* sampled_T, float* sampled_ar, float* sampled_ad,
 	int W, int H,
 	const float2* means2D,
 	const float* depths,
@@ -495,13 +502,14 @@ void FORWARD::render( const dim3 grid, dim3 block, const uint2* ranges,
 	const float* bg_color,
 	float* out_color, 
 	float* out_final_T,
+	float* out_depth,
 	bool no_color) 
 {
 	renderCUDA<NUM_CHAFFELS> <<<grid, block>>> (
 		ranges,
 		point_list,
 		per_tile_bucket_offset, bucket_to_tile,
-		sampled_T, sampled_ar,
+		sampled_T, sampled_ar, sampled_ad,
 		W, H,
 		means2D,
 		depths,
@@ -512,6 +520,7 @@ void FORWARD::render( const dim3 grid, dim3 block, const uint2* ranges,
 		bg_color,
 		out_color,
 		out_final_T,
+		out_depth,
 		no_color);
 }
 

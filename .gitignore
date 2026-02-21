@@ -16,7 +16,8 @@ simple_knn.egg-info/
 
 result/
 
-ckpt/
+ckpt/*
+!ckpt/SPNet.md
 
 *.onnx
 *.engine

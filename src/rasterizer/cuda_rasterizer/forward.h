@@ -118,7 +118,7 @@ namespace FORWARD
 		const uint2* ranges,
 		const uint32_t* point_list,
 		const uint32_t* per_tile_bucket_offset, uint32_t* bucket_to_tile,
-		float* sampled_T, float* sampled_ar,
+		float* sampled_T, float* sampled_ar, float* sampled_ad,
 		int W, int H,
 		const float2* points_xy_image,
 		const float* depth,
@@ -129,6 +129,7 @@ namespace FORWARD
 		const float* bg_color,
 		float* out_color,
 		float* out_final_T,
+		float* out_depth,
 		bool no_color);
 }
 

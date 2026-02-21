@@ -10,6 +10,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -msse4.2")
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
+  roslib
   std_msgs
   cv_bridge
   image_transport
@@ -27,6 +28,10 @@ set(OpenCV_DIR ~/Software/opencv/opencv-4.7.0/build)
 find_package(OpenCV 4 REQUIRED)
 set(Torch_DIR ~/Software/libtorch/share/cmake/Torch)
 find_package(Torch REQUIRED)
+
+set(TENSORRT_ROOT "~/Software/TensorRT-8.6.1.6")
+set(TENSORRT_INCLUDE_DIR "${TENSORRT_ROOT}/include")
+set(TENSORRT_LIB_DIR "${TENSORRT_ROOT}/lib")
 
 set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda-11.7")
 set(CUDA_INCLUDE_DIRS "${CUDA_TOOLKIT_ROOT_DIR}/include")
@@ -53,6 +58,7 @@ include_directories(
   ${OpenCV_INCLUDE_DIRS}
   ${YAML_INCLUDE_DIRS}
   ${Python3_INCLUDE_DIRS}
+  ${TENSORRT_INCLUDE_DIR}
   ${CUDA_INCLUDE_DIRS}
 )
 
@@ -60,6 +66,7 @@ add_executable(gs_mapping
               ${PROJECT_SOURCE_DIR}/src/mapping.cpp 
               ${PROJECT_SOURCE_DIR}/src/gaussian.cpp
               ${PROJECT_SOURCE_DIR}/src/tinyply.cpp
+              ${PROJECT_SOURCE_DIR}/src/depth_completer.cpp 
               ${PROJECT_SOURCE_DIR}/src/simple-knn/spatial.cu
               ${PROJECT_SOURCE_DIR}/src/simple-knn/simple_knn.cu
               ${PROJECT_SOURCE_DIR}/src/fused-ssim/ssim.cu
@@ -77,4 +84,8 @@ target_link_libraries(gs_mapping
                       ${YAML_CPP_LIBRARIES} 
                       ${Python3_LIBRARIES}
                       ${FFI_LIB}
-                      ${CUDA_LIB_DIR}/libcudart.so)
+                      ${CUDA_LIB_DIR}/libcudart.so
+                      ${TENSORRT_LIB_DIR}/libnvinfer.so
+                      ${TENSORRT_LIB_DIR}/libnvonnxparser.so
+                      ${TENSORRT_LIB_DIR}/libnvparsers.so
+                      ${TENSORRT_LIB_DIR}/libnvinfer_plugin.so)

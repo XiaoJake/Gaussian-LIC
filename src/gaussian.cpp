@@ -38,6 +38,71 @@
 
 namespace fs = std::filesystem;
 
+struct PixelPosition 
+{
+    int u, v;
+};
+
+std::vector<PixelPosition> selectFromDepthCompletion(const cv::Mat& depth_A, const cv::Mat& depth_B, int patch_size = 20) 
+{
+    CV_Assert(depth_A.size() == depth_B.size());
+    CV_Assert(depth_A.type() == depth_B.type());
+    
+    int H = depth_A.rows;
+    int W = depth_A.cols;
+    std::vector<PixelPosition> result;
+    result.reserve((H / patch_size) * (W / patch_size));
+
+    for (int i = 0; i < H; i += patch_size) 
+    {
+        for (int j = 0; j < W; j += patch_size) 
+        {
+            int h_end = std::min(i + patch_size, H);
+            int w_end = std::min(j + patch_size, W);
+            
+            bool has_valid_A = false;
+            bool has_valid_B = false;
+            float min_val = std::numeric_limits<float>::max();
+            PixelPosition min_pos;
+            
+            for (int y = i; y < h_end; ++y) 
+            {
+                const float* ptr_A = depth_A.ptr<float>(y);
+                const float* ptr_B = depth_B.ptr<float>(y);
+                
+                for (int x = j; x < w_end; ++x) 
+                {
+                    if (ptr_A[x] > 0) 
+                    {
+                        has_valid_A = true;
+                        y = h_end;
+                        break;
+                    }
+                    
+                    if (ptr_B[x] > 0) 
+                    {
+                        has_valid_B = true;
+                        if (ptr_B[x] < min_val) 
+                        {
+                            min_val = ptr_B[x];
+                            min_pos = {x, y};
+                        }
+                    }
+                }
+            }
+            
+            if (has_valid_A || !has_valid_B) 
+            {
+                continue;
+            }
+            
+            result.push_back(min_pos);
+        }
+    }
+    
+    return result;
+}
+
 void Dataset::addFrame(Frame& cur_frame)
 {
     /// image
@@ -47,6 +112,11 @@ void Dataset::addFrame(Frame& cur_frame)
     cv::Mat image_rgb;
     cv::cvtColor(image_bgr, image_rgb, cv::COLOR_BGR2RGB);  // 0-255
     image_rgb.convertTo(image_rgb, CV_32FC3, 1.0f / 255.0f);  // 0-1
+
+    /// depth
+    cv_bridge::CvImagePtr dp_ptr;
+    dp_ptr = cv_bridge::toCvCopy(cur_frame.depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);
+    cv::Mat depth_map = dp_ptr->image;  // metric float32
 
     /// pose
     Eigen::Quaterniond q_wc;
@@ -77,7 +147,62 @@ void Dataset::addFrame(Frame& cur_frame)
         is_keyframe_current_ = true;
         std::shared_ptr<Camera> cam = std::make_shared<Camera>();
 
+        if (depth_completion_)
+        {
+            cv::Mat completed_depth;  // metric float32
+            completed_depth = depth_completer_.complete(image_rgb, depth_map);
+
+            cv::Mat mask_known = depth_map > 0;  // 0/255 uint8
+            cv::Mat completed_depth_known;
+            completed_depth.copyTo(completed_depth_known, mask_known);
+            cv::Mat depth_difference = completed_depth_known - depth_map;
+            double mean_depth_difference = cv::mean(depth_difference, mask_known)[0];
+
+            if (std::abs(mean_depth_difference) < 0.1)
+            {
+                // wanted_depth：non-edge && positive
+                cv::Mat depth_gradient_x, depth_gradient_y;
+                cv::Sobel(completed_depth, depth_gradient_x, CV_32F, 1, 0, 3);
+                cv::Sobel(completed_depth, depth_gradient_y, CV_32F, 0, 1, 3);
+                cv::Mat depth_edges;
+                cv::magnitude(depth_gradient_x, depth_gradient_y, depth_edges);
+                double edge_threshold = 0.1;
+                cv::Mat mask_not_edges = depth_edges < edge_threshold;  // 0/255 uint8
+                completed_depth -= mean_depth_difference;
+                cv::Mat mask = (completed_depth > 0) & mask_not_edges;  // 0/255 uint8
+                cv::Mat wanted_depth;
+                completed_depth.copyTo(wanted_depth, mask);
+
+                // select
+                std::vector<PixelPosition> new_positions = selectFromDepthCompletion(depth_map, wanted_depth, patch_size_);
+                for (const auto& pt : new_positions) 
+                {
+                    int u = pt.u, v = pt.v;
+                    float depth = wanted_depth.at<float>(v, u);
+                    assert(depth > 0);
+                    if (depth > max_depth_) continue;
+
+                    cv::Vec3f color = image_rgb.at<cv::Vec3f>(v, u);
+                    Eigen::Vector3d eigen_color(color[0], color[1], color[2]);
+
+                    Eigen::Vector3d cam_point((u - cx_) * depth / fx_, 
+                                            (v - cy_) * depth / fy_, 
+                                            depth);
+                    Eigen::Vector3d world_point = q_wc * cam_point + t_wc;
+
+                    pointcloud_.emplace_back(world_point);
+                    pointcolor_.emplace_back(eigen_color);
+                    pointdepth_.emplace_back(static_cast<float>(depth));
+                }
+            }
+            else
+            {
+                // std::cout << "[bef vs aft diff]: " << mean_depth_difference << " m" << std::endl;
+            }
+        }
+
         cam->original_image_ = tensor_utils::cvMat2TorchTensor_Float32(image_rgb, torch::kCPU, true);
+        cam->original_depth_ = tensor_utils::cvMat2TorchTensor_Float32(depth_map, torch::kCPU, true);
         
         std::stringstream ss;
         ss << std::setw(4) << std::setfill('0') << all_frame_num_;
@@ -95,6 +220,7 @@ void Dataset::addFrame(Frame& cur_frame)
         std::shared_ptr<Camera> cam = std::make_shared<Camera>();
 
         cam->original_image_ = tensor_utils::cvMat2TorchTensor_Float32(image_rgb, torch::kCPU);
+        cam->original_depth_ = tensor_utils::cvMat2TorchTensor_Float32(depth_map, torch::kCPU);
 
         std::stringstream ss;
         ss << std::setw(4) << std::setfill('0') << all_frame_num_;
@@ -126,6 +252,9 @@ GaussianModel::GaussianModel(const Params& prm)
     scaling_lr_ = prm.scaling_lr;
     rotation_lr_ = prm.rotation_lr;
     lambda_dssim_ = prm.lambda_dssim;
+    optimize_depth_ = prm.optimize_depth;
+    lambda_depth_ = prm.lambda_depth;
+    iteration_decay_ = prm.iteration_decay;
 
     apply_exposure_ = prm.apply_exposure;
     exposure_lr_ = prm.exposure_lr;
@@ -504,7 +633,7 @@ void extend(const std::shared_ptr<Dataset>& dataset, std::shared_ptr<GaussianMod
     else bg = torch::zeros({3}, torch::kFloat32).cuda();
     std::shared_ptr<Camera> viewpoint_cam = dataset->train_cameras_.back();
     auto render_pkg = render(viewpoint_cam, pc, bg, pc->apply_exposure_, true);
-    auto rendered_alpha = 1 - std::get<1>(render_pkg).squeeze(0);
+    auto rendered_alpha = 1 - std::get<2>(render_pkg).squeeze(0);
 
     int n = dataset->pointcloud_.size();
     std::vector<float> float_point(n * 3);
@@ -637,6 +766,26 @@ void extend(const std::shared_ptr<Dataset>& dataset, std::shared_ptr<GaussianMod
     dataset->pointdepth_.clear();
 }
 
+void decayOptList(int max_iters, const int train_camera_num, 
+                  const std::shared_ptr<Dataset>& dataset, const std::vector<int>& all_list, std::vector<int>& opt_list)
+{
+    Eigen::Vector3d t0 = dataset->t_wc_[0];
+    double dist = (dataset->t_wc_.back() - t0).norm();
+    if (dist > 120)
+    {
+        max_iters /= 2;
+        opt_list.clear();
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        int split = train_camera_num * 2 / 3;
+        int half = max_iters / 2;
+        std::sample(all_list.begin(), all_list.begin() + split,
+                    std::back_inserter(opt_list), std::min(half, split), gen);
+        std::sample(all_list.begin() + split, all_list.end(),
+                    std::back_inserter(opt_list), std::min(half, train_camera_num - split), gen);
+    }
+}
+
 double optimize(const std::shared_ptr<Dataset>& dataset, std::shared_ptr<GaussianModel>& pc)
 {
     pc->t_start_ = std::chrono::steady_clock::now();
@@ -659,6 +808,7 @@ double optimize(const std::shared_ptr<Dataset>& dataset, std::shared_ptr<Gaussia
         std::sample(all_list.begin(), all_list.end(), 
                     std::back_inserter(opt_list), max_iters, gen);
     } 
+    if (pc->iteration_decay_) decayOptList(max_iters, train_camera_num, dataset, all_list, opt_list);
     std::shuffle(opt_list.begin(), opt_list.end(), gen);
     torch::cuda::synchronize();
     pc->t_end_ = std::chrono::steady_clock::now();
@@ -676,19 +826,25 @@ double optimize(const std::shared_ptr<Dataset>& dataset, std::shared_ptr<Gaussia
         pc->t_start_ = std::chrono::steady_clock::now();
         const std::shared_ptr<Camera>& viewpoint_cam = dataset->train_cameras_[idx];
         auto gt_image = viewpoint_cam->original_image_.to(torch::kCUDA, /*non_blocking=*/true);
+        auto gt_depth = viewpoint_cam->original_depth_.to(torch::kCUDA, /*non_blocking=*/true);
         torch::cuda::synchronize();
         pc->t_end_ = std::chrono::steady_clock::now();
         pc->t_tocuda_ += std::chrono::duration_cast<std::chrono::duration<double>>(pc->t_end_ - pc->t_start_).count();
         pc->t_start_ = std::chrono::steady_clock::now();
         auto render_pkg = render(viewpoint_cam, pc, bg, pc->apply_exposure_);
         auto rendered_image = std::get<0>(render_pkg);
+        auto rendered_depth = std::get<1>(render_pkg);
+        auto mask = (gt_depth > 0) & (rendered_depth > 0);
         auto Ll1 = loss_utils::l1_loss(rendered_image, gt_image);
+        auto Ll1_depth = torch::abs(rendered_depth.masked_select(mask) - gt_depth.masked_select(mask)).mean();
         float lambda_dssim = pc->lambda_dssim_;
+        float lambda_depth = pc->lambda_depth_;
         torch::Tensor ssim_value;
         torch::Tensor rendered_image_unsq = rendered_image.unsqueeze(0);
         torch::Tensor gt_image_unsq = gt_image.unsqueeze(0);
         ssim_value = loss_utils::fused_ssim(rendered_image_unsq, gt_image_unsq);
         auto loss = (1.0 - lambda_dssim) * Ll1 + lambda_dssim * (1.0 - ssim_value);
+        if (pc->optimize_depth_) loss += lambda_depth * Ll1_depth;
         torch::cuda::synchronize();
         pc->t_end_ = std::chrono::steady_clock::now();
         pc->t_forward_ += std::chrono::duration_cast<std::chrono::duration<double>>(pc->t_end_ - pc->t_start_).count();
@@ -700,7 +856,7 @@ double optimize(const std::shared_ptr<Dataset>& dataset, std::shared_ptr<Gaussia
         pc->t_backward_ += std::chrono::duration_cast<std::chrono::duration<double>>(pc->t_end_ - pc->t_start_).count();
 
         pc->t_start_ = std::chrono::steady_clock::now();
-        auto visible = std::get<3>(render_pkg);
+        auto visible = std::get<4>(render_pkg);
         updated_num += visible.sum().item<int>();
         pc->sparse_optimizer_->set_visibility_and_N(visible, pc->getXYZ().size(0));
         pc->sparse_optimizer_->step();
@@ -731,6 +887,8 @@ void evaluateVisualQuality(const std::shared_ptr<Dataset>& dataset,
 
     std::string render_dir_path = result_path + "/render";
     fs::create_directories(render_dir_path);
+    std::string render_depth_dir_path = result_path + "/render_depth";
+    fs::create_directories(render_depth_dir_path);
     std::string gt_dir_path = result_path + "/gt";
     fs::create_directories(gt_dir_path);
 
@@ -756,6 +914,7 @@ void evaluateVisualQuality(const std::shared_ptr<Dataset>& dataset,
         {
             auto render_pkg = render(train_camera, pc, bg, pc->apply_exposure_);
             auto rendered_image = std::get<0>(render_pkg).clamp(0, 1);
+            auto rendered_depth = std::get<1>(render_pkg);
             auto gt_image = train_camera->original_image_.cuda().clamp(0, 1);
             double psnr = loss_utils::psnr(rendered_image, gt_image).mean().item<double>();
             double ssim = loss_utils::ssim(rendered_image, gt_image).item<double>();
@@ -780,6 +939,14 @@ void evaluateVisualQuality(const std::shared_ptr<Dataset>& dataset,
             cv::Mat b_img(H, W, CV_8UC3, b_cpu.data_ptr<uint8_t>());
             cv::cvtColor(b_img, b_img, cv::COLOR_RGB2BGR);
             cv::imwrite(gt_dir_path + "/" + train_camera->image_name_, b_img);
+
+            torch::Tensor depth_map_normalized = (rendered_depth - rendered_depth.min()) / 
+                                                     (rendered_depth.max() - rendered_depth.min()) * 255;
+            torch::Tensor c_cpu = depth_map_normalized.to(torch::kCPU);
+            cv::Mat c_img(H, W, CV_32FC1, c_cpu.data_ptr<float>());
+            c_img.convertTo(c_img, CV_8UC1);
+            cv::applyColorMap(c_img, c_img, cv::COLORMAP_JET);
+            cv::imwrite(render_depth_dir_path + "/" + train_camera->image_name_, c_img);
         }
         psnrs /= dataset->train_cameras_.size();
         ssims /= dataset->train_cameras_.size();
@@ -796,6 +963,7 @@ void evaluateVisualQuality(const std::shared_ptr<Dataset>& dataset,
         {
             auto render_pkg = render(test_camera, pc, bg, pc->apply_exposure_);
             auto rendered_image = std::get<0>(render_pkg).clamp(0, 1);
+            auto rendered_depth = std::get<1>(render_pkg);
             auto gt_image = test_camera->original_image_.cuda().clamp(0, 1);
             double psnr = loss_utils::psnr(rendered_image, gt_image).mean().item<double>();
             double ssim = loss_utils::ssim(rendered_image, gt_image).item<double>();
@@ -820,6 +988,14 @@ void evaluateVisualQuality(const std::shared_ptr<Dataset>& dataset,
             cv::Mat b_img(H, W, CV_8UC3, b_cpu.data_ptr<uint8_t>());
             cv::cvtColor(b_img, b_img, cv::COLOR_RGB2BGR);
             cv::imwrite(gt_dir_path + "/" + test_camera->image_name_, b_img);
+
+            torch::Tensor depth_map_normalized = (rendered_depth - rendered_depth.min()) / 
+                                                     (rendered_depth.max() - rendered_depth.min()) * 255;
+            torch::Tensor c_cpu = depth_map_normalized.to(torch::kCPU);
+            cv::Mat c_img(H, W, CV_32FC1, c_cpu.data_ptr<float>());
+            c_img.convertTo(c_img, CV_8UC1);
+            cv::applyColorMap(c_img, c_img, cv::COLORMAP_JET);
+            cv::imwrite(render_depth_dir_path + "/" + test_camera->image_name_, c_img);
         }
         psnrs /= dataset->test_cameras_.size();
         ssims /= dataset->test_cameras_.size();

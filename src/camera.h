@@ -115,6 +115,7 @@ public:
     int image_width_;              
     int image_height_;
     torch::Tensor original_image_;
+    torch::Tensor original_depth_;
           
     float fx_;
     float fy_;

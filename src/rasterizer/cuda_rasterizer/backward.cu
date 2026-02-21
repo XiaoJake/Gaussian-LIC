@@ -147,6 +147,7 @@ __global__ void computeCov2DCUDA(int P,
 	const float limy_pos,
 	const float* view_matrix,
 	const float* dL_dconics,
+	const float* dL_ddepth,
 	float3* dL_dmeans,
 	float* dL_dcov)
 {
@@ -248,6 +249,7 @@ __global__ void computeCov2DCUDA(int P,
 	float dL_dtx = x_grad_mul * -focal_x * tz2 * dL_dJ02;
 	float dL_dty = y_grad_mul * -focal_y * tz2 * dL_dJ12;
 	float dL_dtz = -focal_x * tz2 * dL_dJ00 - focal_y * tz2 * dL_dJ11 + (2 * focal_x * t.x) * tz3 * dL_dJ02 + (2 * focal_y * t.y) * tz3 * dL_dJ12;
+	dL_dtz += dL_ddepth[idx];
 
 	float3 dL_dmean = transformVec4x3Transpose({ dL_dtx, dL_dty, dL_dtz }, view_matrix);
 
@@ -384,7 +386,7 @@ PerGaussianRenderCUDA(
 	int W, int H, int B,
 	const uint32_t* __restrict__ per_tile_bucket_offset,
 	const uint32_t* __restrict__ bucket_to_tile,
-	const float* __restrict__ sampled_T, const float* __restrict__ sampled_ar,
+	const float* __restrict__ sampled_T, const float* __restrict__ sampled_ar, const float* __restrict__ sampled_ad,
 	const float* __restrict__ bg_color,
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ points_depths,
@@ -393,11 +395,14 @@ PerGaussianRenderCUDA(
 	const uint32_t* __restrict__ n_contrib,
 	const uint32_t* __restrict__ max_contrib,
 	const float* __restrict__ pixel_colors,
+	const float* __restrict__ pixel_depth,
 	const float* __restrict__ dL_dpixels,
+	const float* __restrict__ dL_dpix_depth,
 	float3* __restrict__ dL_dmean2D,
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
-	float* __restrict__ dL_dcolors) 
+	float* __restrict__ dL_dcolors,
+    float* __restrict__ dL_ddepth) 
 {
 	// global_bucket_idx = warp_idx
 	auto block = cg::this_thread_block();
@@ -432,6 +437,7 @@ PerGaussianRenderCUDA(
 	float2 xy = {0.0f, 0.0f};
 	float4 con_o = {0.0f, 0.0f, 0.0f, 0.0f};
 	float c[C] = {0.0f};
+	float depth = 0.f;
 	if (valid_splat) 
 	{
 		gaussian_idx = point_list[splat_idx_global];
@@ -439,6 +445,7 @@ PerGaussianRenderCUDA(
 		con_o = conic_opacity[gaussian_idx];
 		for (int ch = 0; ch < C; ++ch)
 			c[ch] = colors[gaussian_idx * C + ch];
+		depth = points_depths[gaussian_idx];
 	}
 
 	// Gradient accumulation variables
@@ -449,6 +456,7 @@ PerGaussianRenderCUDA(
 	float Register_dL_dconic2D_w = 0.0f;
 	float Register_dL_dopacity = 0.0f;
 	float Register_dL_dcolors[C] = {0.0f};
+	float Register_dL_ddepth = 0.f;
 
 	// tile metadata
 	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
@@ -461,6 +469,7 @@ PerGaussianRenderCUDA(
 	float ar[C];
 	float dL_dpixel[C];
 	float ad;
+	float dL_dpixel_depth;
 	const float ddelx_dx = 0.5 * W;
 	const float ddely_dy = 0.5 * H;
 
@@ -468,6 +477,9 @@ PerGaussianRenderCUDA(
 	__shared__ float Shared_sampled_ar[32 * C + 1];  // color
 	sampled_ar += global_bucket_idx * BLOCK_SIZE * C;
 	__shared__ float Shared_pixels[32 * C];
+	__shared__ float Shared_sampled_ad[32 + 1];  // depth
+	sampled_ad += global_bucket_idx * BLOCK_SIZE;
+	__shared__ float Shared_pixels_depth[32];
 
 	// iterate over all pixels in the tile
 	// int start = my_warp.meta_group_rank() * (BLOCK_SIZE / my_warp.meta_group_size());
@@ -491,6 +503,10 @@ PerGaussianRenderCUDA(
 				Shared_pixels[ch * 32 + block.thread_rank()] = pixel_colors[ch * H * W + id];
 			}
 
+			int shift = i + block.thread_rank();
+			Shared_sampled_ad[block.thread_rank()] = sampled_ad[shift];
+			Shared_pixels_depth[block.thread_rank()] = pixel_depth[id];
+
 			block.sync();
 		}
 
@@ -505,6 +521,8 @@ PerGaussianRenderCUDA(
 			ar[ch] = my_warp.shfl_up(ar[ch], 1);
 			dL_dpixel[ch] = my_warp.shfl_up(dL_dpixel[ch], 1);
 		}
+		ad = my_warp.shfl_up(ad, 1);
+		dL_dpixel_depth = my_warp.shfl_up(dL_dpixel_depth, 1);
 
 		// which pixel index should this thread deal with?
 		int idx = i - my_warp.thread_rank();
@@ -522,11 +540,13 @@ PerGaussianRenderCUDA(
 			int ii = i % 32;
 			for (int ch = 0; ch < C; ++ch)
 				ar[ch] = -Shared_pixels[ch * 32 + ii] + Shared_sampled_ar[ch * 32 + ii];
+			ad = -Shared_pixels_depth[ii] + Shared_sampled_ad[ii];
 			last_contributor = n_contrib[pix_id];
 			for (int ch = 0; ch < C; ++ch) 
 			{ 
 				dL_dpixel[ch] = dL_dpixels[ch * H * W + pix_id]; 
 			}
+			dL_dpixel_depth = dL_dpix_depth[pix_id];
 		}
 
 		// do work
@@ -557,6 +577,10 @@ PerGaussianRenderCUDA(
 				Register_dL_dcolors[ch] += dchannel_dcolor * dL_dchannel;
 				dL_dalpha += ((c[ch] * T) - alpha_inverse * (-ar[ch])) * dL_dchannel;
 			}
+			ad += T * alpha * depth;
+			const float &dL_dchannel = dL_dpixel_depth;
+			Register_dL_ddepth += dchannel_dcolor * dL_dchannel;
+			dL_dalpha += ((depth * T) - alpha_inverse * (-ad)) * dL_dchannel;
 			T *= (1.0f - alpha);
 
 
@@ -593,6 +617,7 @@ PerGaussianRenderCUDA(
 		{
 			atomicAdd(&dL_dcolors[gaussian_idx * C + ch], Register_dL_dcolors[ch]);
 		}
+		atomicAdd(&dL_ddepth[gaussian_idx], Register_dL_ddepth);
 	}
 }
 
@@ -620,6 +645,7 @@ void BACKWARD::preprocess(
 	const float* dL_dconic,
 	glm::vec3* dL_dmean3D,
 	float* dL_dcolor,
+	float* dL_ddepth,
 	float* dL_dcov3D,
 	float* dL_ddc,
 	float* dL_dsh,
@@ -642,6 +668,7 @@ void BACKWARD::preprocess(
 	    limy_pos,
 		viewmatrix,
 		dL_dconic,
+		dL_ddepth,
 		(float3*)dL_dmean3D,
 		dL_dcov3D);
 
@@ -676,7 +703,7 @@ void BACKWARD::render(
 	int W, int H, int R, int B,
 	const uint32_t* per_bucket_tile_offset,
 	const uint32_t* bucket_to_tile,
-	const float* sampled_T, const float* sampled_ar,
+	const float* sampled_T, const float* sampled_ar, const float* sampled_ad,
 	const float* bg_color,
 	const float2* means2D,
 	const float* depths,
@@ -685,11 +712,14 @@ void BACKWARD::render(
 	const uint32_t* n_contrib,
 	const uint32_t* max_contrib,
 	const float* pixel_colors,
+	const float* pixel_depth,
 	const float* dL_dpixels,
+	const float* dL_dpix_depth,
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
 	float* dL_dopacity,
-	float* dL_dcolors) 
+	float* dL_dcolors,
+    float* dL_ddepth) 
 {
 	const int THREADS = 32;
 	PerGaussianRenderCUDA<NUM_CHAFFELS> <<<((B*32) + THREADS - 1), THREADS>>>(
@@ -700,7 +730,7 @@ void BACKWARD::render(
 		W, H, B,
 		per_bucket_tile_offset,
 		bucket_to_tile,
-		sampled_T, sampled_ar,
+		sampled_T, sampled_ar, sampled_ad,
 		bg_color,
 		means2D,
 		depths,
@@ -709,10 +739,13 @@ void BACKWARD::render(
 		n_contrib,
 		max_contrib,
 		pixel_colors,
+		pixel_depth,
 		dL_dpixels,
+		dL_dpix_depth,
 		dL_dmean2D,
 		dL_dconic2D,
 		dL_dopacity,
-		dL_dcolors
+		dL_dcolors,
+		dL_ddepth
 		);
 }

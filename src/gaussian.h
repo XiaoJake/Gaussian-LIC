@@ -43,6 +43,8 @@
 #include "simple-knn/spatial.h"
 #include "rasterizer/renderer.h"
 
+#include "depth_completer.h"
+
 const double C0 = 0.28209479177387814;
 inline double RGB2SH(double color) {return (color - 0.5) / C0;}
 inline torch::Tensor RGB2SH(torch::Tensor& rgb) {return (rgb - 0.5f) / C0;}
@@ -53,7 +55,10 @@ public:
     Dataset(const Params& prm)
       : fx_(prm.fx), fy_(prm.fy), cx_(prm.cx), cy_(prm.cy),
         select_every_k_frame_(prm.select_every_k_frame),
-        all_frame_num_(0), is_keyframe_current_(false) {}
+        depth_completion_(prm.depth_completion),
+        patch_size_(prm.patch_size), max_depth_(prm.max_depth),
+        all_frame_num_(0), is_keyframe_current_(false),
+        depth_completer_(prm.engine_path, prm.width, prm.height) {}
         
     void addFrame(Frame& cur_frame);
 
@@ -64,6 +69,9 @@ public:
     double cy_;
 
     int select_every_k_frame_;
+    bool depth_completion_;
+    int patch_size_;
+    double max_depth_;
 
 
     int all_frame_num_;
@@ -78,6 +86,8 @@ public:
     
     std::vector<std::shared_ptr<Camera>> train_cameras_;
     std::vector<std::shared_ptr<Camera>> test_cameras_;
+
+    DepthCompleter depth_completer_;
 };
 
 
@@ -143,6 +153,9 @@ public:
     double scaling_lr_;
     double rotation_lr_;
     double lambda_dssim_;
+    bool optimize_depth_;
+    double lambda_depth_;
+    bool iteration_decay_;
 
     bool apply_exposure_;
     double exposure_lr_;

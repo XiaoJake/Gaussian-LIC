@@ -30,6 +30,7 @@
 
 #include <geometry_msgs/PoseStamped.h>
 #include <ros/ros.h>
+#include <ros/package.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <tf/tf.h>
@@ -63,6 +64,12 @@ public:
         cy = node["cy"].as<double>();
 
         select_every_k_frame = node["select_every_k_frame"].as<int>();
+        depth_completion = node["depth_completion"].as<bool>();
+        patch_size = node["patch_size"].as<int>();
+        max_depth = node["max_depth"].as<double>();
+        std::string pkg_path = ros::package::getPath("gaussian_lic");
+        if (height == 512 && width == 640) engine_path = pkg_path + "/ckpt/spnet_512_640.engine";
+        if (height == 480 && width == 640) engine_path = pkg_path + "/ckpt/spnet_480_640.engine";
 
         sh_degree = node["sh_degree"].as<int>();
         white_background = node["white_background"].as<bool>();
@@ -70,7 +77,7 @@ public:
         convert_SHs_python = node["convert_SHs_python"].as<bool>();
         compute_cov3D_python = node["compute_cov3D_python"].as<bool>();
         lambda_erank = node["lambda_erank"].as<double>();
-        scaling_scale = node["scaling_scale"].as<int>();
+        scaling_scale = node["scaling_scale"].as<double>();
 
         position_lr = node["position_lr"].as<double>();
         feature_lr = node["feature_lr"].as<double>();
@@ -78,6 +85,9 @@ public:
         scaling_lr = node["scaling_lr"].as<double>();
         rotation_lr = node["rotation_lr"].as<double>();
         lambda_dssim = node["lambda_dssim"].as<double>();
+        optimize_depth = node["optimize_depth"].as<bool>();
+        lambda_depth = node["lambda_depth"].as<double>();
+        iteration_decay = node["iteration_decay"].as<bool>();
 
         apply_exposure = node["apply_exposure"].as<bool>();
         exposure_lr = node["exposure_lr"].as<double>();
@@ -94,6 +104,10 @@ public:
     double cy;
 
     int select_every_k_frame;
+    bool depth_completion;
+    int patch_size;
+    double max_depth;
+    std::string engine_path;
 
     /// gaussian
     int sh_degree;
@@ -110,6 +124,9 @@ public:
     double scaling_lr;
     double rotation_lr;
     double lambda_dssim;
+    bool optimize_depth;
+    double lambda_depth;
+    bool iteration_decay;
 
     bool apply_exposure;
     double exposure_lr;
@@ -122,4 +139,5 @@ struct Frame
     sensor_msgs::PointCloud2ConstPtr point_msg;
     geometry_msgs::PoseStampedConstPtr pose_msg;
     sensor_msgs::ImageConstPtr image_msg;
+    sensor_msgs::ImageConstPtr depth_msg;
 };

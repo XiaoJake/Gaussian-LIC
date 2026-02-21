@@ -99,7 +99,7 @@ public:
     GaussianRasterizer(GaussianRasterizationSettings& raster_settings)
         : raster_settings_(raster_settings){}
 
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(
+    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> forward(
         torch::Tensor means3D,
         torch::Tensor means2D,
         torch::Tensor opacities,

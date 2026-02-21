@@ -23,8 +23,8 @@ Gaussian-LIC is a photo-realistic LiDAR-Inertial-Camera Gaussian Splatting SLAM 
 
 ### 📢 News
 
-- [2026-02-15] Gaussian-LIC2 will be released in the coming days!
-- [2025-07-08] Gaussian-LIC2 is unveiled! 🎉 [[`Paper`](https://arxiv.org/pdf/2507.04004)] [[`Page`](https://xingxingzuo.github.io/gaussian_lic2/)] [[`YouTube`](https://www.youtube.com/watch?v=SkPnpuCfh88)] [[`bilibili`](https://www.bilibili.com/video/BV1fJ3kzfEYv/?spm_id_from=333.337.search-card.all.click&vd_source=99ac6409fc9373f3960feff31c28a189)] (to be released here)
+- [2026-02-21] Gaussian-LIC2 is released! 🚀 (stay tuned for updates)
+- [2025-07-08] Gaussian-LIC2 is unveiled! 🎉 [[`Paper`](https://arxiv.org/pdf/2507.04004)] [[`Page`](https://xingxingzuo.github.io/gaussian_lic2/)] [[`YouTube`](https://www.youtube.com/watch?v=SkPnpuCfh88)] [[`bilibili`](https://www.bilibili.com/video/BV1fJ3kzfEYv/?spm_id_from=333.337.search-card.all.click&vd_source=99ac6409fc9373f3960feff31c28a189)] 
 - [2025-07-07] The enhanced version of the Gaussian-LIC code is released!
 - [2025-01-28] Gaussian-LIC is accepted to ICRA 2025! 🎉
 - [2024-09-26] The second version of the paper is available on arXiv.
@@ -147,7 +147,7 @@ If you find our work helpful, please consider citing 🌟:
 
 ## Acknowledgement
 
-Thanks for [3DGS](https://github.com/graphdeco-inria/gaussian-splatting), [Taming-3DGS](https://github.com/humansensinglab/taming-3dgs), [StopThePop](https://github.com/r4dl/StopThePop) and [Photo-SLAM](https://github.com/HuajianUP/Photo-SLAM).
+Thanks for [3DGS](https://github.com/graphdeco-inria/gaussian-splatting), [Taming-3DGS](https://github.com/humansensinglab/taming-3dgs), [StopThePop](https://github.com/r4dl/StopThePop), [Photo-SLAM](https://github.com/HuajianUP/Photo-SLAM) and [SPNet](https://github.com/Wang-xjtu/SPNet).
 
 ## LICENSE
 

@@ -34,6 +34,7 @@ std::condition_variable con;
 std::queue<sensor_msgs::PointCloud2ConstPtr> point_buf;
 std::queue<geometry_msgs::PoseStampedConstPtr> pose_buf;
 std::queue<sensor_msgs::ImageConstPtr> image_buf;
+std::queue<sensor_msgs::ImageConstPtr> depth_buf;
 
 std::atomic<bool> exit_flag(false);
 std::atomic<double> last_point_time(0.0);
@@ -61,9 +62,16 @@ void imageCallback(const sensor_msgs::ImageConstPtr& image_msg)
     m_buf.unlock();
 }
 
+void depthCallback(const sensor_msgs::ImageConstPtr& depth_msg) 
+{
+    m_buf.lock();
+    depth_buf.push(depth_msg);
+    m_buf.unlock();
+}
+
 bool getAlignedData(Frame& cur_frame)
 {
-    if (point_buf.empty() || pose_buf.empty() || image_buf.empty()) 
+    if (point_buf.empty() || pose_buf.empty() || image_buf.empty() || depth_buf.empty()) 
     {
         return false;
     }
@@ -106,17 +114,38 @@ bool getAlignedData(Frame& cur_frame)
         return false;
     }
 
+    while (1) 
+    {
+        if (depth_buf.front()->header.stamp.toSec() < frame_time - 0.01) 
+        {
+            depth_buf.pop();
+            if (depth_buf.empty()) 
+            {
+                return false;
+            }
+        } 
+        else break;
+    }
+    if (depth_buf.front()->header.stamp.toSec() > frame_time + 0.01) 
+    {
+        point_buf.pop();
+        return false;
+    }
+
     auto cur_point = point_buf.front();
     auto cur_pose = pose_buf.front();
     auto cur_image = image_buf.front();
+    auto cur_depth = depth_buf.front();
 
     cur_frame.point_msg = cur_point;
     cur_frame.pose_msg = cur_pose;
     cur_frame.image_msg = cur_image;
+    cur_frame.depth_msg = cur_depth;
 
     point_buf.pop();
     pose_buf.pop();
     image_buf.pop();
+    depth_buf.pop();
 
     return true;
 }
@@ -211,6 +240,7 @@ int main(int argc, char** argv)
     ros::Subscriber sub_point = nh.subscribe("/points_for_gs", 10000, pointCallback);
     ros::Subscriber sub_pose = nh.subscribe("/pose_for_gs", 10000, poseCallback);
     image_transport::Subscriber image_sub = it_.subscribe("/image_for_gs", 10000, imageCallback);
+    image_transport::Subscriber depth_sub = it_.subscribe("/depth_for_gs", 10000, depthCallback);
 
     std::string config_path;
     nh.param<std::string>("config_path", config_path, "");
@@ -225,9 +255,11 @@ int main(int argc, char** argv)
         while (!exit_flag) 
         {
             double now = ros::Time::now().toSec();
-            if (gaussians_initialized && (now - last_point_time > 1.0)) 
+            if (gaussians_initialized && (now - last_point_time > 5.0)) 
             {
-                exit_flag = true;  // exit if no data is received for more than 1 second
+                m_buf.lock();
+                if (point_buf.empty()) exit_flag = true;
+                m_buf.unlock();
             } 
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }

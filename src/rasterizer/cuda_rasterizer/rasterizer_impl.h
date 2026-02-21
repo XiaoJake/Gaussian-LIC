@@ -57,6 +57,7 @@ namespace CudaRasterizer
 		size_t bucket_count_scan_size;
 		char * bucket_count_scanning_space;
 		float* pixel_colors;
+		float* pixel_depth;
 		uint32_t* max_contrib;
 
 		size_t scan_size;
@@ -88,6 +89,7 @@ namespace CudaRasterizer
 		uint32_t *bucket_to_tile;
 		float *T;
 		float *ar;
+		float *ad;
 		static SampleState fromChunk(char*& chunk, size_t C);
 	};
 

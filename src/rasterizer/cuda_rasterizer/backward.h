@@ -34,7 +34,7 @@ namespace BACKWARD
 		int W, int H, int R, int B,
 		const uint32_t* per_bucket_tile_offset,
 		const uint32_t* bucket_to_tile,
-		const float* sampled_T, const float* sampled_ar,
+		const float* sampled_T, const float* sampled_ar, const float* sampled_ad,
 		const float* bg_color,
 		const float2* means2D,
 		const float* depths,
@@ -43,11 +43,14 @@ namespace BACKWARD
 		const uint32_t* n_contrib,
 		const uint32_t* max_contrib,
 		const float* pixel_colors,
+		const float* pixel_depth,
 		const float* dL_dpixels,
+		const float* dL_dpix_depth,
 		float3* dL_dmean2D,
 		float4* dL_dconic2D,
 		float* dL_dopacity,
-		float* dL_dcolors);
+		float* dL_dcolors,
+	    float* dL_ddepth);
 
 	void preprocess(
 		int P, int D, int M,
@@ -73,6 +76,7 @@ namespace BACKWARD
 		const float* dL_dconics,
 		glm::vec3* dL_dmeans,
 		float* dL_dcolor,
+		float* dL_ddepth,
 		float* dL_dcov3D,
 		float* dL_ddc,
 		float* dL_dsh,

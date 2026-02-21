@@ -259,6 +259,7 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 
 	obtain(chunk, img.max_contrib, N, 128);
 	obtain(chunk, img.pixel_colors, N * NUM_CHAFFELS, 128);
+	obtain(chunk, img.pixel_depth, N, 128);
 	obtain(chunk, img.bucket_count, N, 128);
 	obtain(chunk, img.bucket_offsets, N, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, img.bucket_count_scan_size, img.bucket_count, img.bucket_count, N);
@@ -272,6 +273,7 @@ CudaRasterizer::SampleState CudaRasterizer::SampleState::fromChunk(char *& chunk
 	obtain(chunk, sample.bucket_to_tile, C * BLOCK_SIZE, 128);
 	obtain(chunk, sample.T, C * BLOCK_SIZE, 128);
 	obtain(chunk, sample.ar, NUM_CHAFFELS * C * BLOCK_SIZE, 128);
+	obtain(chunk, sample.ad, C * BLOCK_SIZE, 128);
 	return sample;
 }
 
@@ -337,6 +339,7 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
 	const bool prefiltered,
 	float* out_color,
 	float* out_final_T,
+	float* out_depth,
 	int* radii,
 	bool debug, bool no_color) 
 {
@@ -455,6 +458,7 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
 		sampleState.bucket_to_tile,
 		sampleState.T, 
 		sampleState.ar,
+		sampleState.ad,
 		width, height,
 		geomState.means2D,
 		geomState.depths,
@@ -463,12 +467,14 @@ std::tuple<int,int> CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		imgState.max_contrib,
 		background,
-		out_color, out_final_T, no_color), debug)
+		out_color, out_final_T, out_depth, no_color), debug)
 
 	if (!no_color) 
 	{
 		// out_color -> imgState.pixel_colors
+		// out_depth -> imgState.pixel_depth
 		CHECK_CUDA(cudaMemcpy(imgState.pixel_colors, out_color, sizeof(float) * width * height * NUM_CHAFFELS, cudaMemcpyDeviceToDevice), debug);
+		CHECK_CUDA(cudaMemcpy(imgState.pixel_depth, out_depth, sizeof(float) * width * height, cudaMemcpyDeviceToDevice), debug);
 	}
 	return std::make_tuple(num_rendered, bucket_sum);
 }
@@ -499,6 +505,7 @@ void CudaRasterizer::Rasterizer::backward(
 	char* img_buffer,
 	char* sample_buffer,
 	const float* dL_dpix,
+	const float* dL_dpix_depth,
 	float* dL_dmean2D,
 	float* dL_dconic,
 	float* dL_dopacity,
@@ -509,6 +516,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
+	float* dL_ddepth,
 	const float lambda_erank,
 	bool debug) 
 {
@@ -534,6 +542,7 @@ void CudaRasterizer::Rasterizer::backward(
 		sampleState.bucket_to_tile,
 		sampleState.T,
 		sampleState.ar,
+		sampleState.ad,
 		background,
 		geomState.means2D,
 		geomState.depths,
@@ -542,11 +551,14 @@ void CudaRasterizer::Rasterizer::backward(
 		imgState.n_contrib,
 		imgState.max_contrib,
 		imgState.pixel_colors,
+		imgState.pixel_depth,
 		dL_dpix,
+		dL_dpix_depth,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
-		dL_dcolor), debug)
+		dL_dcolor,
+	    dL_ddepth), debug)
 
 	const float* cov3D_ptr = (cov3D_precomp != nullptr) ? cov3D_precomp : geomState.cov3D;
 	CHECK_CUDA(BACKWARD::preprocess(P, D, M,
@@ -572,6 +584,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dconic,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
+		dL_ddepth,
 		dL_dcov3D,
 		dL_ddc,
 		dL_dsh,

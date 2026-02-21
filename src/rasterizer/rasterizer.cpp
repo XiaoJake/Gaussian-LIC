@@ -63,11 +63,12 @@ GaussianRasterizerFunction::forward(
     auto num_buckets = std::get<1>(rasterization_result);
     auto color = std::get<2>(rasterization_result);
     auto final_T = std::get<3>(rasterization_result);
-    auto radii = std::get<4>(rasterization_result);
-    auto geomBuffer = std::get<5>(rasterization_result);
-    auto binningBuffer = std::get<6>(rasterization_result);
-    auto imgBuffer = std::get<7>(rasterization_result);
-    auto sampleBuffer = std::get<8>(rasterization_result);
+    auto depth = std::get<4>(rasterization_result);
+    auto radii = std::get<5>(rasterization_result);
+    auto geomBuffer = std::get<6>(rasterization_result);
+    auto binningBuffer = std::get<7>(rasterization_result);
+    auto imgBuffer = std::get<8>(rasterization_result);
+    auto sampleBuffer = std::get<9>(rasterization_result);
 
     ctx->saved_data["num_rendered"] = num_rendered;
     ctx->saved_data["num_buckets"] = num_buckets;
@@ -96,7 +97,7 @@ GaussianRasterizerFunction::forward(
                             binningBuffer,
                             imgBuffer,
                             sampleBuffer});
-    return {color, radii, final_T};
+    return {color, radii, depth, final_T};
 }
 
 torch::autograd::tensor_list
@@ -135,7 +136,8 @@ GaussianRasterizerFunction::backward(
 
     auto dL_dcolor = grad_outputs[0];
     // auto dL_dradii = grad_outputs[1];
-    // auto dL_dfinal_T = grad_outputs[2];
+    auto dL_ddepth = grad_outputs[2];
+    // auto dL_dfinal_T = grad_outputs[3];
     auto rasterization_backward_result = RasterizeGaussiansBackwardCUDA(
         bg,
         means3D,
@@ -154,6 +156,7 @@ GaussianRasterizerFunction::backward(
         limy_neg,
         limy_pos,
         dL_dcolor,
+        dL_ddepth,
         dc,
         sh,
         sh_degree,
@@ -182,7 +185,7 @@ GaussianRasterizerFunction::backward(
     };
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 GaussianRasterizer::forward(
     torch::Tensor means3D,
     torch::Tensor means2D,
@@ -212,5 +215,5 @@ GaussianRasterizer::forward(
         cov3D_precomp,
         raster_settings
     );
-    return std::make_tuple(result[0], result[1], result[2]);
+    return std::make_tuple(result[0], result[1], result[2], result[3]);
 }
