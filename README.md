@@ -148,6 +148,7 @@ Quick start on the sequence CBD_Building_01 in the FAST-LIVO2 dataset.
 
 - [ ] Support fast post-optimization
 - [ ] Release the optimized Coco-LIC
+- [ ] Provide the dockerfile
 - [ ] Release the meshing tools
 - [ ] Release our Gaussian-LIC2 dataset
 
